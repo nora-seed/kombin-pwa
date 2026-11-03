@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Kombin — Renk Motoru Testleri</title>
+<style>
+body { font-family: ui-monospace, monospace; background: #14161c; color: #ddd; padding: 20px; line-height: 1.7; }
+.pass { color: #6fdc9c; }
+.fail { color: #ff8f8a; font-weight: 700; }
+h2 { color: #9ccdea; }
+</style>
+</head>
+<body>
+<h2>Kombin renk motoru testleri</h2>
+<div id="out"></div>
+<script src="../colors.js"></script>
+<script>
+const out = document.getElementById("out");
+let fails = 0, total = 0;
+function t(name, cond) {
+  total++;
+  const d = document.createElement("div");
+  d.className = cond ? "pass" : "fail";
+  d.textContent = (cond ? "✔ " : "✘ ") + name;
+  out.appendChild(d);
+  if (!cond) fails++;
+}
+const C = window.C;
+t("classify lacivert", C.classify("#1f2a44").fam === "lacivert");
+t("classify beyaz nötr", C.classify("#f4f2ec").neutral === true);
+t("classify hardal canlı", C.classify("#c9971e").neutral === false);
+t("classify kırmızı sıcak değil 'sıcak'", C.classify("#b3222a").warmth === "sıcak" || C.classify("#b3222a").warmth !== "soğuk");
+t(" beyaz->lacivert tablo puanı 96", C.pairScore(C.classify("#f4f2ec"), C.classify("#1f2a44")).score === 96);
+t("lacivert->beyaz simetrik", C.pairScore(C.classify("#1f2a44"), C.classify("#f4f2ec")).score === 96);
+t("lacivert-kahve 82", C.pairScore(C.classify("#1f2a44"), C.classify("#5d4037")).score === 82);
+t("hardal-kirmizi zayıf (<75)", C.pairScore(C.classify("#c9971e"), C.classify("#b3222a")).score < 75);
+const comboGreat = C.scoreCombo({ ust: C.classify("#f4f2ec"), alt: C.classify("#1f2a44"), ayakkabi: C.classify("#6d4c41") });
+t("klasik beyaz/lacivert/kahve >= 90", comboGreat.score >= 90);
+t("not var: kontrast", comboGreat.notes.some(n => n.includes("kontrast")));
+const comboDiff = C.scoreCombo({ ust: C.classify("#6b7095"), alt: C.classify("#5a5c66"), ayakkabi: C.classify("#4a4a4e") });
+t("silik sade kombin < klasik", comboDiff.score <= comboGreat.score);
+const combo4colors = C.scoreCombo({
+  ust: C.classify("#e8c33c"), alt: C.classify("#b3222a"), ayakkabi: C.classify("#2f5d3a"), dis: C.classify("#cc5a1e")
+});
+t("4 canlı renk ceza", combo4colors.notes.some(n => n.includes("sadeleştir")));
+const wardrobe = [
+  { id: "u1", category: "ust", color: "#f4f2ec", fav: 0 },
+  { id: "u2", category: "ust", color: "#6d2e46", fav: 1 },
+  { id: "a1", category: "alt", color: "#1f2a44", fav: 0 },
+  { id: "a2", category: "alt", color: "#d5bd9a", fav: 1 },
+  { id: "s1", category: "ayakkabi", color: "#5d4037", fav: 0 },
+  { id: "s2", category: "ayakkabi", color: "#1c1c1e", fav: 0 },
+  { id: "d1", category: "dis", color: "#b98a55", fav: 0 }
+];
+const g1 = C.generateCombos(wardrobe, "a1");
+t("generateCombos sonuç döndü", g1.combos.length > 0);
+t("skor sıralı", g1.combos.every((c, i, a) => i === 0 || a[i - 1].score >= c.score));
+const g2 = C.generateCombos(wardrobe, "a1", { limit: 3 });
+t("limit uygulanır", g2.combos.length <= 3);
+t("üst tekrar yok (düpe)", new Set(g2.combos.map(c => c.ids.ust + c.ids.alt + c.ids.ayakkabi + c.ids.dis)).size === g2.combos.length);
+const gEmpty = C.generateCombos([wardrobe[2]], "a1");
+t("eksik kategori mesajı", !!gEmpty.message);
+const sp = C.surprise(wardrobe, new Set());
+t("surprise kombin döndü", sp.combos.length === 1 && sp.combos[0].score > 0);
+t("deltaE siyah-beyaz ~100", Math.abs(C.deltaE("#000000", "#ffffff") - 100) < 4);
+t("deltaE aynı renk 0", C.deltaE("#5d4037", "#5d4037") < 0.001);
+t("rgbToHex tur", C.rgbToHex(29, 42, 68) === "#1f2a44");
+</script>
+<p id="summary"></p>
+<script>
+document.getElementById("summary").textContent = fails === 0 ? "HEPSİ GEÇTİ (" + total + ")" : fails + " TEST BAŞARISIZ / " + total;
+</script>
+</body>
+</html>

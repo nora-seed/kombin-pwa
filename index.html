@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17405f">
+<meta name="description" content="Kişisin: kıyafetler kamera ile dolabında, renk motoru kombin önerir, panoda yerleştirirsin.">
+<title>Kombin — Kişisel Gardırop Stüdyosu</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">🧥 Kombin <small>· gardırobum</small></div>
+  <button id="menuBtn" class="icon-btn" aria-label="Yedek ve ayarlar">⋯</button>
+  <button id="themeBtn" class="icon-btn" aria-label="Tema">◐</button>
+</header>
+
+<main id="view"></main>
+
+<nav class="tabbar">
+  <button data-nav="dolap" class="active"><span>🧺</span>Dolap</button>
+  <button data-nav="kombin"><span>✨</span>Kombin</button>
+  <button data-nav="pano"><span>🎨</span>Pano</button>
+  <button data-nav="rehber"><span>📚</span>Rehber</button>
+</nav>
+
+<div id="toast" class="toast"></div>
+<div id="modalRoot"></div>
+
+<script src="colors.js"></script>
+<script src="db.js"></script>
+<script src="camera.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+</script>
+</body>
+</html>
