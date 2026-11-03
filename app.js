@@ -21,11 +21,11 @@
   };
   const SEASONS = ["İlkbahar", "Yaz", "Sonbahar", "Kış"];
   const SLOT_POS = {
-    dis: { x: 50, y: 17, w: 46 },
-    ust: { x: 50, y: 24, w: 44 },
-    alt: { x: 50, y: 60, w: 42 },
-    ayakkabi: { x: 50, y: 89, w: 30 },
-    aksesuar: { x: 50, y: 43, w: 18 },
+    dis: { x: 50, y: 14, w: 46 },
+    ust: { x: 50, y: 27, w: 40 },
+    alt: { x: 50, y: 62, w: 36 },
+    ayakkabi: { x: 50, y: 90.5, w: 24 },
+    aksesuar: { x: 50, y: 19.5, w: 12 },
   };
   const SLOTS = ["dis", "ust", "alt", "ayakkabi"];
 
@@ -616,14 +616,25 @@
   function renderPano(v) {
     const wrap = el("div", "pano-wrap");
     const board = el("div", "board");
-    SLOTS.forEach((slot) => {
-      const g = el("div", "slot-guide " + slot);
-      g.append(el("span", "", CATS[slot].icon + " " + CATS[slot].n));
-      board.append(g);
-    });
+    const mannequin = el("div", "mannequin");
+    mannequin.innerHTML = '<svg viewBox="0 0 300 430" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g fill="currentColor"><circle cx="150" cy="38" r="26"/><rect x="140" y="58" width="20" height="18" rx="7"/><rect x="83" y="92" width="22" height="118" rx="11"/><rect x="195" y="92" width="22" height="118" rx="11"/><path d="M118 76 L182 76 C194 76 199 88 197 102 L191 226 C189 242 182 248 170 248 L130 248 C118 248 111 242 109 226 L103 102 C101 88 106 76 118 76 Z"/><rect x="116" y="248" width="30" height="142" rx="14"/><rect x="154" y="248" width="30" height="142" rx="14"/></g></svg>';
+    board.append(mannequin);
+    const ghostWrap = el("div", "ghosts");
+    board.append(ghostWrap);
     const placedLayer = el("div", "placed");
     board.append(placedLayer);
     wrap.append(board);
+    wrap.append(el("div", "pano-hint", "💡 Arka plan dolu parçalar dağınık durur — Dolap → kıyafete dokun → ✨ Düzenle → Oto Zemin ile temizle."));
+
+    function ghostSync() {
+      ghostWrap.innerHTML = "";
+      SLOTS.forEach((slot) => {
+        if (state.pano.items.some((p) => p.cat === slot)) return;
+        const g = el("button", "slot-ghost " + slot, "+ " + CATS[slot].n);
+        g.onclick = (ev) => { ev.stopPropagation(); openPicker(slot); };
+        ghostWrap.append(g);
+      });
+    }
 
     const itemById = {};
     state.items.forEach((i) => (itemById[i.id] = i));
@@ -648,6 +659,8 @@
         node.addEventListener("pointerdown", (e) => startDrag(e, p));
         placedLayer.append(node);
       });
+      ghostSync();
+      toolSync();
       traySync();
     }
 
@@ -868,7 +881,7 @@
     }
 
     wrap.addEventListener("pointerdown", (e) => {
-      if (e.target === board || e.target === placedLayer || e.target.classList.contains("slot-guide")) {
+      if (e.target === board || e.target === placedLayer || e.target === ghostWrap) {
         state.pano.sel = null;
         toolSync();
         paint();

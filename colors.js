@@ -21,6 +21,7 @@
     haki:       { name: "Haki",         hex: "#6b705c", neutral: true },
     zeytin:     { name: "Zeytin Yeşili",hex: "#556b2f" },
     yesil:      { name: "Yeşil",        hex: "#2f5d3a", dark: true },
+    zumrit:     { name: "Zümrüt Yeşili",hex: "#1f9163", cool: true },
     acikyesil:  { name: "Açık Yeşil",   hex: "#93b08a" },
     bordo:      { name: "Bordo",        hex: "#6d2e46", dark: true },
     kirmizi:    { name: "Kırmızı",      hex: "#b3222a" },
@@ -61,6 +62,7 @@
     turuncu: { turuncu: 72, beyaz: 86, krem: 84, gri: 80, antrasit: 78, siyah: 78, camel: 78, taba: 80, kahve: 80, ten: 82, haki: 74, zeytin: 80, yesil: 76, acikyesil: 74, bordo: 76, kirmizi: 78, hardal: 82, sari: 84, pas: 82, pembe: 72, tozpembe: 72, lila: 68, esmermor: 66, mavi: 80, acikmavi: 78, denim: 78, petrol: 74, lacivert: 72, bej: 80 },
     esmermor: { esmermor: 74, beyaz: 84, krem: 84, gri: 82, antrasit: 80, siyah: 78, camel: 78, taba: 78, kahve: 76, ten: 78, haki: 70, zeytin: 72, yesil: 72, acikyesil: 74, bordo: 82, kirmizi: 72, hardal: 68, sari: 66, pas: 70, turuncu: 66, pembe: 80, tozpembe: 80, lila: 84, mavi: 80, acikmavi: 80, denim: 78, petrol: 76, lacivert: 76, bej: 82 },
     ten: { ten: 78, beyaz: 88, krem: 86, gri: 85, antrasit: 84, siyah: 84, camel: 88, taba: 88, kahve: 88, haki: 84, zeytin: 84, yesil: 82, acikyesil: 82, bordo: 80, kirmizi: 76, hardal: 80, sari: 76, pas: 84, turuncu: 82, pembe: 82, tozpembe: 82, lila: 80, esmermor: 78, mavi: 84, acikmavi: 84, denim: 84, petrol: 82, lacivert: 82, bej: 86 },
+    zumrit: { zumrit: 80, beyaz: 88, krem: 90, gri: 82, antrasit: 84, siyah: 82, camel: 82, taba: 82, kahve: 80, ten: 78, haki: 78, zeytin: 80, yesil: 76, acikyesil: 78, bordo: 74, kirmizi: 66, hardal: 70, sari: 68, pas: 76, turuncu: 70, pembe: 74, tozpembe: 76, lila: 70, esmermor: 70, mavi: 82, acikmavi: 80, denim: 84, petrol: 86, lacivert: 84, bej: 84 },
     tozpembe: { tozpembe: 74, beyaz: 88, krem: 86, gri: 86, antrasit: 84, siyah: 80, camel: 82, taba: 82, kahve: 80, ten: 82, haki: 76, zeytin: 76, yesil: 76, acikyesil: 78, bordo: 82, kirmizi: 76, hardal: 72, sari: 70, pas: 74, turuncu: 72, pembe: 86, lila: 84, esmermor: 80, mavi: 84, acikmavi: 86, denim: 84, petrol: 78, lacivert: 82, bej: 86 },
   };
 

@@ -125,10 +125,10 @@
     let consistent = true;
     corners.forEach(([x, y]) => {
       const i = (y * w + x) * 4;
-      if (Math.abs(px[i] - br) + Math.abs(px[i + 1] - bg) + Math.abs(px[i + 2] - bb) > 90) consistent = false;
+      if (Math.abs(px[i] - br) + Math.abs(px[i + 1] - bg) + Math.abs(px[i + 2] - bb) > 110) consistent = false;
     });
     if (!consistent) return false;
-    const tol = 46;
+    const tol = 52;
     const visited = new Uint8Array(w * h);
     const qx = new Uint32Array(w * h);
     let qt = 0, qe = 0;
@@ -179,40 +179,54 @@
   }
 
   function dominantColor(canvas) {
-    const side = 64;
+    const side = 80;
     const c = el("canvas");
     c.width = side; c.height = side;
     const ctx = c.getContext("2d");
-    ctx.drawImage(canvas, 0, 0, side, side);
+    const cw = canvas.width, ch = canvas.height;
+    const cw2 = Math.max(1, Math.round(cw * 0.62)), ch2 = Math.max(1, Math.round(ch * 0.62));
+    ctx.drawImage(canvas, (cw - cw2) / 2, (ch - ch2) / 2, cw2, ch2, 0, 0, side, side);
     const px = ctx.getImageData(0, 0, side, side).data;
-    const buckets = new Map();
+    const hueBins = new Array(12).fill(null).map(() => ({ n: 0, r: 0, g: 0, b: 0 }));
+    const achro = { siyah: { n: 0, r: 0, g: 0, b: 0 }, koyugri: { n: 0, r: 0, g: 0, b: 0 }, acik: { n: 0, r: 0, g: 0, b: 0 } };
+    let totalPx = 0;
     for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3] < 40) continue;
+      if (px[i + 3] < 50) continue;
       const r = px[i], g = px[i + 1], b = px[i + 2];
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      if (max - min < 14 && max > 232 && max - min >= 0) {
-        const key = "w" + ((max > 250) ? "b" : "g");
-        const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
-        e.n++; e.r += r; e.g += g; e.b += b; buckets.set(key, e);
+      totalPx++;
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      const v = mx / 255, s = mx === 0 ? 0 : (mx - mn) / mx;
+      const add = (o) => { o.n++; o.r += r; o.g += g; o.b += b; };
+      if (s < 0.16) {
+        const key = v < 0.16 ? "siyah" : v < 0.5 ? "koyugri" : "acik";
+        add(achro[key]);
         continue;
       }
-      if (max < 34) { const e = buckets.get("blk") || { n: 0, r: 0, g: 0, b: 0 }; e.n++; e.r += r; e.g += g; e.b += b; buckets.set("blk", e); continue; }
-      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-      const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
-      e.n++; e.r += r; e.g += g; e.b += b; buckets.set(key, e);
+      let h0 = 0;
+      const d = mx - mn;
+      if (mx === r) h0 = ((g - b) / d) % 6;
+      else if (mx === g) h0 = (b - r) / d + 2;
+      else h0 = (r - g) / d + 4;
+      const bin = ((Math.round(h0 * 60 / 30) % 12) + 12) % 12;
+      add(hueBins[bin]);
     }
-    let best = null;
-    buckets.forEach((v) => { if (!best || v.n > best.n) best = v; });
-    if (!best) return "#8a8d8f";
-    const total = best.n;
-    const r = best.r / total, g = best.g / total, b = best.b / total;
+    let bestHue = null;
+    hueBins.forEach((bn) => { if (!bestHue || bn.n > bestHue.n) bestHue = bn; });
+    let bestAc = null;
+    Object.keys(achro).forEach((k2) => { if (!bestAc || achro[k2].n > bestAc.n) bestAc = achro[k2]; });
+    const avg = (o) => o.n ? [o.r / o.n, o.g / o.n, o.b / o.n] : null;
+    let rgb = null;
+    if (bestHue && bestHue.n >= totalPx * 0.14) rgb = avg(bestHue);
+    else if (bestAc && bestAc.n > 0) rgb = avg(bestAc);
+    else rgb = bestHue && bestHue.n ? avg(bestHue) : null;
+    if (!rgb) return "#8a8d8f";
     const C_ = root.C;
     if (C_ && C_.rgbToHex && C_.FAMILIES) {
-      const info = C_.classify(C_.rgbToHex(r, g, b));
+      const info = C_.classify(C_.rgbToHex(rgb[0], rgb[1], rgb[2]));
       return C_.FAMILIES[info.fam].hex;
     }
     const h = (v) => Math.round(v).toString(16).padStart(2, "0");
-    return "#" + h(r) + h(g) + h(b);
+    return "#" + h(rgb[0]) + h(rgb[1]) + h(rgb[2]);
   }
 
   function edit(srcBlob) {
@@ -222,89 +236,68 @@
       ov.innerHTML = "";
       const head = el("div", "ed-head");
       const title = el("div", "ed-title", "Fotoğrafı düzenle");
-      const headR = el("div", "ed-head-r");
-      const undoBtn = el("button", "ed-tool", "↶");
-      const closeBtn = el("button", "ed-tool", "✕");
-      headR.append(undoBtn, closeBtn);
-      head.append(title, headR);
+      const closeBtn = el("button", "ed-tool round", "✕");
+      head.append(title, closeBtn);
       const stageWrap = el("div", "ed-stage");
+      const canvasWrap = el("div", "ed-canvas-wrap");
       const base = toBaseCanvas(img);
+      base.className = "ed-base";
       const ctx = base.getContext("2d");
       base.style.touchAction = "none";
-      stageWrap.appendChild(base);
-      const tools = el("div", "ed-tools");
-      const bCrop = el("button", "ed-tool", "✂️");
-      bCrop.title = "Kırp";
-      const bErase = el("button", "ed-tool", "🖌️");
-      bErase.title = "Silgi";
-      const bFlood = el("button", "ed-tool", "✨");
-      bFlood.title = "Arka planı otomatik temizle";
-      const bSave = el("button", "ed-tool primary", "Kaydet");
+      const overlayCanvas = el("canvas");
+      overlayCanvas.className = "ed-overlay";
+      canvasWrap.append(base, overlayCanvas);
+      stageWrap.appendChild(canvasWrap);
+
       const sizeRow = el("div", "ed-size hidden");
       const sizeInp = el("input");
-      sizeInp.type = "range"; sizeInp.min = 8; sizeInp.max = 80; sizeInp.value = 30;
+      sizeInp.type = "range";
+      sizeInp.min = 8;
+      sizeInp.max = 80;
+      sizeInp.value = 30;
       sizeRow.append(el("span", "", "Silgi boyutu"), sizeInp);
-      tools.append(bCrop, bErase, bFlood, sizeRow, bSave);
+      const mkTool = (ico, lbl, cls) => {
+        const b = el("button", "ed-tool" + (cls ? " " + cls : ""));
+        b.append(el("span", "ico", ico), el("span", "lbl", lbl));
+        return b;
+      };
+      const bUndo = mkTool("↶", "Geri");
+      const bCrop = mkTool("✂️", "Kırp");
+      const bErase = mkTool("🖌️", "Silgi");
+      const bFlood = mkTool("✨", "Oto Zemin");
+      const bSave = mkTool("💾", "Kaydet", "primary");
+      const toolRow = el("div", "ed-tool-row");
+      toolRow.append(bUndo, bCrop, bErase, bFlood, bSave);
+      const tools = el("div", "ed-tools");
+      tools.append(sizeRow, toolRow);
       ov.append(head, stageWrap, tools);
 
       let history = [];
       let mode = "none";
       let cropRect = null;
-      let cropHandles = null;
+      let cropOn = false;
       let eraseOn = false;
       let stroking = false;
       let lastPt = null;
       let pointerPts = new Map();
-      let pinchStart = null;
-
-      const snap = () => {
-        history.push(pushHistory(base));
-        if (history.length > 8) history.shift();
-      };
-      const undo = () => {
-        const c = history.pop();
-        if (c) { base.width = c.width; base.height = c.height; ctx.drawImage(c, 0, 0); }
-        else toastBase("Geri alınacak işlem yok");
-      };
-      undoBtn.onclick = undo;
-      closeBtn.onclick = () => { closeOverlay(); resolve(undefined); };
 
       const toastBase = (msg) => {
         const t = el("div", "ed-toast", msg);
         ov.appendChild(t);
-        setTimeout(() => t.remove(), 1800);
-      };
-      root._edToast = toastBase;
-
-      const canvasPt = (e) => {
-        const r = base.getBoundingClientRect();
-        return { x: (e.clientX - r.left) * base.width / r.width, y: (e.clientY - r.top) * base.height / r.height };
+        setTimeout(() => t.remove(), 1900);
       };
 
-      const setMode = (m) => {
-        mode = m;
-        cropRect = null;
-        eraseOn = m === "erase";
-        sizeRow.classList.toggle("hidden", m !== "erase");
-        [bCrop, bErase].forEach((b) => b.classList.remove("active"));
-        cropable(m === "crop");
-        if (m === "crop") { bCrop.classList.add("active"); snap(); cropRect = { x: base.width * 0.08, y: base.height * 0.08, w: base.width * 0.84, h: base.height * 0.84 }; drawOverlay(); toastBase("Köşelerden tutup kırp, sonra ✂️'e tekrar bas"); }
-        else if (m === "erase") { bErase.classList.add("active"); snap(); drawOverlay(); }
-        else { drawOverlay(); }
-      };
-
-      const overlayCanvas = el("canvas");
-      overlayCanvas.className = "ed-overlay";
-      stageWrap.appendChild(overlayCanvas);
       const cropable = (on) => overlayCanvas.classList.toggle("cropable", on);
+
       const drawOverlay = () => {
         const r = base.getBoundingClientRect();
-        overlayCanvas.width = r.width; overlayCanvas.height = r.height;
+        overlayCanvas.width = Math.max(1, Math.round(r.width));
+        overlayCanvas.height = Math.max(1, Math.round(r.height));
         const octx = overlayCanvas.getContext("2d");
         octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
         if (mode === "crop" && cropRect) {
           const s = overlayCanvas.width / base.width;
-          octx.fillStyle = "rgba(0,0,0,0.55)";
+          octx.fillStyle = "rgba(10,12,16,0.55)";
           octx.beginPath();
           octx.rect(0, 0, overlayCanvas.width, overlayCanvas.height);
           octx.rect(cropRect.x * s, cropRect.y * s, cropRect.w * s, cropRect.h * s);
@@ -312,16 +305,31 @@
           octx.strokeStyle = "#fff";
           octx.lineWidth = 2;
           octx.strokeRect(cropRect.x * s, cropRect.y * s, cropRect.w * s, cropRect.h * s);
-          const c1 = [cropRect.x * s, cropRect.y * s], c2 = [(cropRect.x + cropRect.w) * s, (cropRect.y + cropRect.h) * s];
-          [c1, c2].forEach(([cx, cy]) => {
+          [[cropRect.x, cropRect.y], [cropRect.x + cropRect.w, cropRect.y + cropRect.h]].forEach(([cx, cy]) => {
             octx.beginPath();
-            octx.arc(cx, cy, 12, 0, 7);
+            octx.arc(cx * s, cy * s, 12, 0, 7);
             octx.fillStyle = "#fff";
             octx.fill();
           });
         }
       };
-      root._edDrawOverlay = drawOverlay;
+
+      const snap = () => {
+        history.push(pushHistory(base));
+        if (history.length > 8) history.shift();
+      };
+      const undo = () => {
+        const c = history.pop();
+        if (c) { base.width = c.width; base.height = c.height; ctx.drawImage(c, 0, 0); drawOverlay(); }
+        else toastBase("Geri alınacak işlem yok");
+      };
+      bUndo.onclick = undo;
+      closeBtn.onclick = () => { closeOverlay(); resolve(undefined); };
+
+      const canvasPt = (e) => {
+        const r = base.getBoundingClientRect();
+        return { x: (e.clientX - r.left) * base.width / r.width, y: (e.clientY - r.top) * base.height / r.height };
+      };
 
       const applyCrop = () => {
         if (!cropRect) return;
@@ -337,7 +345,29 @@
         ctx.drawImage(out, 0, 0);
         setMode("none");
       };
-      root._edApplyCrop = applyCrop;
+
+      const setMode = (m) => {
+        mode = m;
+        cropOn = false;
+        cropRect = null;
+        eraseOn = m === "erase";
+        sizeRow.classList.toggle("hidden", m !== "erase");
+        bCrop.classList.remove("active");
+        bErase.classList.remove("active");
+        bCrop.querySelector(".lbl").textContent = "Kırp";
+        cropable(m === "crop");
+        if (m === "crop") {
+          bCrop.classList.add("active");
+          bCrop.querySelector(".lbl").textContent = "Uygula ✓";
+          snap();
+          cropRect = { x: base.width * 0.08, y: base.height * 0.08, w: base.width * 0.84, h: base.height * 0.84 };
+          toastBase("Köşelerden tutup ayarla, sonra Kırp'a tekrar bas");
+        } else if (m === "erase") {
+          bErase.classList.add("active");
+          snap();
+        }
+        drawOverlay();
+      };
 
       const eraseStroke = (a, b) => {
         ctx.save();
@@ -366,61 +396,38 @@
           const p = canvasPt(e);
           eraseStroke(lastPt, p);
           lastPt = p;
-        } else if (pointerPts.size === 2) {
-          const [a, b] = [...pointerPts.values()];
-          if (pinchStart) {
-            const d = Math.hypot(b.x - a.x, b.y - a.y);
-            const ang = Math.atan2(b.y - a.y, b.x - a.x);
-            const k = d / pinchStart.d;
-            const da = ang - pinchStart.ang;
-            if (Math.abs(k - 1) > 0.05 || Math.abs(da) > 0.2) {
-              root._edToast("Kırp modunda yakınlaştırma — kırpı kapatıp kullan");
-            }
-          } else {
-            pinchStart = { d: Math.hypot(b.x - a.x, b.y - a.y), ang: Math.atan2(b.y - a.y, b.x - a.x) };
-          }
         }
       });
       const endPointer = (e) => {
         pointerPts.delete(e.pointerId);
-        if (pointerPts.size < 2) pinchStart = null;
         stroking = false;
       };
       base.addEventListener("pointerup", endPointer);
       base.addEventListener("pointercancel", endPointer);
 
-      const handleRectPointer = (e) => {
-        if (mode !== "crop" || !cropRect) return;
-        const r = overlayCanvas.getBoundingClientRect();
-        const s = base.width / overlayCanvas.width;
-        const x = (e.clientX - r.left) * s, y = (e.clientY - r.top) * s;
-        return { x: x, y: y };
-      };
-
-      let dragHandle = null, dragMove = null, dragStart = null;
       overlayCanvas.style.touchAction = "none";
+      let dragHandle = null, dragMove = null, dragStart = null;
+      const overlayPt = (e) => {
+        const r = overlayCanvas.getBoundingClientRect();
+        return { x: (e.clientX - r.left) * base.width / r.width, y: (e.clientY - r.top) * base.height / r.height };
+      };
       overlayCanvas.addEventListener("pointerdown", (e) => {
-        if (mode !== "crop") return;
+        if (mode !== "crop" || !cropRect) return;
         e.preventDefault();
         overlayCanvas.setPointerCapture(e.pointerId);
-        const p = handleRectPointer(e);
-        if (!p) return;
-        const s = base.width / overlayCanvas.width;
+        const p = overlayPt(e);
         const c1 = { x: cropRect.x, y: cropRect.y }, c2 = { x: cropRect.x + cropRect.w, y: cropRect.y + cropRect.h };
-        if (Math.hypot((p.x - c1.x) / s, (p.y - c1.y) / s) < 28) dragHandle = 1;
-        else if (Math.hypot((p.x - c2.x) / s, (p.y - c2.y) / s) < 28) dragHandle = 2;
-        else if (p.x / s > cropRect.x && p.x / s < cropRect.x + cropRect.w && p.y / s > cropRect.y && p.y / s < cropRect.y + cropRect.h) { dragMove = p; dragStart = { x: cropRect.x, y: cropRect.y }; }
+        if (Math.hypot(p.x - c1.x, p.y - c1.y) * 0.5 < 12) dragHandle = 1;
+        else if (Math.hypot(p.x - c2.x, p.y - c2.y) * 0.5 < 12) dragHandle = 2;
+        else if (p.x > cropRect.x && p.x < cropRect.x + cropRect.w && p.y > cropRect.y && p.y < cropRect.y + cropRect.h) { dragMove = p; dragStart = { x: cropRect.x, y: cropRect.y }; }
       });
       overlayCanvas.addEventListener("pointermove", (e) => {
-        if (mode !== "crop") return;
-        const p = handleRectPointer(e);
-        if (!p || (!dragHandle && !dragMove)) return;
-        const s = base.width / overlayCanvas.width;
-        const px = p.x / s, py = p.y / s;
-        if (dragHandle === 1) { const r = { x: px, y: py, w: Math.max(24, cropRect.x + cropRect.w - px), h: Math.max(24, cropRect.y + cropRect.h - py) }; cropRect = r; }
-        else if (dragHandle === 2) { const r = { x: cropRect.x, y: cropRect.y, w: Math.max(24, px - cropRect.x), h: Math.max(24, py - cropRect.y) }; cropRect = r; }
+        if (mode !== "crop" || !cropRect || (!dragHandle && !dragMove)) return;
+        const p = overlayPt(e);
+        if (dragHandle === 1) { const r = { x: p.x, y: p.y, w: Math.max(24, cropRect.x + cropRect.w - p.x), h: Math.max(24, cropRect.y + cropRect.h - p.y) }; cropRect = r; }
+        else if (dragHandle === 2) { const r = { x: cropRect.x, y: cropRect.y, w: Math.max(24, p.x - cropRect.x), h: Math.max(24, p.y - cropRect.y) }; cropRect = r; }
         else if (dragMove) {
-          const dx = px - dragMove.x, dy = py - dragMove.y;
+          const dx = p.x - dragMove.x, dy = p.y - dragMove.y;
           dragMove = p;
           cropRect.x = Math.max(0, Math.min(base.width - cropRect.w, dragStart.x + dx));
           cropRect.y = Math.max(0, Math.min(base.height - cropRect.h, dragStart.y + dy));
@@ -428,19 +435,18 @@
         drawOverlay();
       });
       overlayCanvas.addEventListener("pointerup", () => { dragHandle = null; dragMove = null; });
+      overlayCanvas.addEventListener("pointercancel", () => { dragHandle = null; dragMove = null; });
 
-      let cropToggled = false;
       bCrop.onclick = () => {
-        if (cropToggled) { applyCrop(); cropToggled = false; }
-        else { cropToggled = true; }
-        setMode(cropToggled ? "crop" : "none");
+        if (cropOn) applyCrop();
+        else setMode("crop");
       };
       bErase.onclick = () => setMode(eraseOn ? "none" : "erase");
       bFlood.onclick = () => {
         snap();
         const ok = floodClear(base);
-        if (!ok) toastBase("Arka plan yeterince düz değil — silgiyle silebilirsin");
-        else toastBase("Düz zemin temizlendi ✔");
+        if (!ok) toastBase("Arka plan yeterince düz değil — silgiyle sil, karanlık köşeleri kırp");
+        else toastBase("Zemin temizlendi ✔");
       };
       bSave.onclick = () => {
         const hasAlpha = (() => {
@@ -455,6 +461,9 @@
           resolve({ blob: b, alpha: hasAlpha, width: out.width, height: out.height });
         }, hasAlpha ? "image/png" : "image/jpeg", 0.85);
       };
+
+      window.addEventListener("resize", drawOverlay);
+      setMode("none");
     }));
   }
 
