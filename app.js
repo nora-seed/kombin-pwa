@@ -20,14 +20,38 @@
     aksesuar: { n: "Aksesuar", icon: "🧣" },
   };
   const SEASONS = ["İlkbahar", "Yaz", "Sonbahar", "Kış"];
-  const SLOT_POS = {
-    dis: { x: 50, y: 14, w: 46 },
-    ust: { x: 50, y: 27, w: 40 },
-    alt: { x: 50, y: 62, w: 36 },
-    ayakkabi: { x: 50, y: 90.5, w: 24 },
-    aksesuar: { x: 50, y: 19.5, w: 12 },
-  };
   const SLOTS = ["dis", "ust", "alt", "ayakkabi"];
+  const Z_DEFAULT = { alt: 0, ust: 1, ayakkabi: 1, dis: 2, aksesuar: 3 };
+  const BOARD_AR = 0.714;
+  const FIT_TARGETS = {
+    dis: { h: 0.34, top: 0.08, maxW: 58 },
+    ust: { h: 0.30, top: 0.115, maxW: 52 },
+    alt: { h: 0.37, top: 0.55, maxW: 46 },
+    ayakkabi: { h: 0.095, top: 0.87, maxW: 30 },
+    aksesuar: { h: 0.12, top: 0.115, maxW: 20 },
+  };
+
+  function fitLayout(item, cat, bw) {
+    const t = FIT_TARGETS[cat] || FIT_TARGETS.aksesuar;
+    bw = bw || BOARD_AR;
+    const ar = (item && item.iw && item.ih) ? item.ih / item.iw : 1.33;
+    let w = t.h / (bw * (ar || 1)) * 100;
+    if (w > t.maxW) w = t.maxW;
+    if (w < 8) w = 8;
+    const h = ((w / 100) * ar) / bw;
+    const y = t.top + Math.min(h, 0.98 - t.top) / 2;
+    return { x: 50, y: Math.round(y * 1000) / 10, w: Math.round(w * 10) / 10 };
+  }
+
+  function syncItemGeometry(item, p, cat, isLocked) {
+    if (!item || !item.img || (item.iw && item.ih)) return Promise.resolve();
+    return CAM.loadImage(item.img).then((img) => {
+      item.iw = img.naturalWidth;
+      item.ih = img.naturalHeight;
+      try { DB.ITEMS.put(Object.assign({}, item)); } catch (e) { }
+      if (p && !isLocked()) Object.assign(p, fitLayout(item, cat));
+    }).catch(() => { });
+  }
 
   const state = {
     view: "dolap",
@@ -501,16 +525,17 @@
 
   function comboMiniVisual(comboIds) {
     const box = el("div", "mini");
-    SLOTS.forEach((slot) => {
+    ["alt", "ayakkabi", "ust", "dis", "aksesuar"].forEach((slot) => {
       const id = comboIds[slot];
       if (!id) return;
       const it = state.items.find((i) => i.id === id);
       if (!it || !u(it)) return;
       const img = el("img");
       img.src = u(it);
-      img.style.left = SLOT_POS[slot].x + "%";
-      img.style.top = SLOT_POS[slot].y + "%";
-      img.style.width = SLOT_POS[slot].w + "%";
+      const lit = fitLayout(it, slot, 0.75);
+      img.style.left = lit.x + "%";
+      img.style.top = lit.y + "%";
+      img.style.width = lit.w + "%";
       box.append(img);
     });
     if (!box.children.length) {
@@ -660,8 +685,12 @@
       Object.keys(combo.ids).forEach((slot) => {
         const id = combo.ids[slot];
         if (!id) return;
-        const pos = SLOT_POS[slot] || SLOT_POS.aksesuar;
-        state.pano.items.push({ itemId: id, cat: slot, x: pos.x, y: pos.y, w: pos.w, rot: 0, z: state.pano.items.length });
+        const it = state.items.find((i) => i.id === id);
+        if (!it) return;
+        const p = { itemId: id, cat: slot, rot: 0, z: Z_DEFAULT[slot] != null ? Z_DEFAULT[slot] : state.pano.items.length };
+        Object.assign(p, fitLayout(it, slot));
+        state.pano.items.push(p);
+        syncItemGeometry(it, p, slot, () => p._locked);
       });
       navigate("pano");
       toast("Panoda yerleşti — istersen elle oynat");
@@ -676,10 +705,11 @@
       layout: layout || (function () {
         const arr = [];
         let k = 0;
-        Object.keys(ids).forEach((slot) => {
+        ["alt", "ust", "ayakkabi", "dis", "aksesuar"].forEach((slot) => {
           if (!ids[slot]) return;
-          const pos = SLOT_POS[slot] || SLOT_POS.aksesuar;
-          arr.push({ itemId: ids[slot], cat: slot, x: pos.x, y: pos.y, w: pos.w, rot: 0, z: k++ });
+          const it = state.items.find((i) => i.id === ids[slot]);
+          arr.push(Object.assign({ itemId: ids[slot], cat: slot, rot: 0, z: k++ }, it ? fitLayout(it, slot) : { x: 50, y: 50, w: 30 }));
+          k = arr[arr.length - 1].z + 1;
         });
         return arr;
       })(),
@@ -719,7 +749,7 @@
     const wrap = el("div", "pano-wrap");
     const board = el("div", "board");
     const mannequin = el("div", "mannequin");
-    mannequin.innerHTML = '<svg viewBox="0 0 300 430" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g fill="currentColor">' + MANNEQUIN_SHAPES + "</g></svg>";
+    mannequin.innerHTML = mannequinSvg("var(--man-a)", "var(--man-b)", "var(--man-line)");
     board.append(mannequin);
     const ghostWrap = el("div", "ghosts");
     board.append(ghostWrap);
@@ -778,6 +808,8 @@
       if (!dragState || !dragState.pts.has(e.pointerId)) return;
       dragState.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (dragState.pts.size === 1) {
+        const moved = Math.hypot(e.clientX - dragState.sx, e.clientY - dragState.sy);
+        if (moved > 4) dragState.p._locked = true;
         const r = board.getBoundingClientRect();
         dragState.p.x = Math.max(5, Math.min(95, dragState.ox + (e.clientX - dragState.sx) * 100 / r.width));
         dragState.p.y = Math.max(5, Math.min(97, dragState.oy + (e.clientY - dragState.sy) * 100 / r.height));
@@ -795,6 +827,7 @@
         if (!dragState.pinch) {
           dragState.pinch = { d, ang, w: dragState.p.w, rot: dragState.p.rot || 0 };
         } else {
+          dragState.p._locked = true;
           dragState.p.w = Math.max(8, Math.min(95, dragState.pinch.w * d / dragState.pinch.d));
           dragState.p.rot = dragState.pinch.rot + (ang - dragState.pinch.ang) * 57.3;
           paintLight();
@@ -857,6 +890,7 @@
     function rotSel(d) {
       const s = state.pano.sel;
       if (!s) return;
+      s._locked = true;
       s.rot = ((s.rot || 0) + d) % 360;
       paint();
     }
@@ -883,8 +917,11 @@
         const have = state.pano.items.find((p) => p.cat === cat);
         if (have) {
           state.pano.items = state.pano.items.filter((p) => p !== have);
-          const pos = SLOT_POS[cat] || SLOT_POS.aksesuar;
-          state.pano.items.push({ itemId: have.itemId, cat: cat, x: pos.x, y: pos.y, w: pos.w, rot: have.rot, z: state.pano.items.length });
+          const it = state.items.find((i) => i.id === have.itemId);
+          const np = { itemId: have.itemId, cat: cat, rot: have.rot || 0, z: have.z != null ? have.z : state.pano.items.length };
+          Object.assign(np, fitLayout(it || {}, cat));
+          state.pano.items.push(np);
+          if (it) syncItemGeometry(it, np, cat, () => np._locked);
         }
         openPicker(cat);
       };
@@ -965,9 +1002,20 @@
         t.append(box, el("div", "tile-label", it.name));
         t.onclick = () => {
           const existing = state.pano.items.find((p) => p.cat === cat);
-          const pos = SLOT_POS[cat] || SLOT_POS.aksesuar;
-          if (existing) Object.assign(existing, { itemId: it.id, x: pos.x, y: pos.y, w: pos.w, rot: 0 });
-          else state.pano.items.push({ itemId: it.id, cat: cat, x: pos.x, y: pos.y, w: pos.w, rot: 0, z: state.pano.items.length });
+          const lit = fitLayout(it, cat);
+          let p;
+          if (existing) {
+            p = existing;
+            if (!p._locked) Object.assign(p, lit, { rot: 0 });
+            p.itemId = it.id;
+            p.cat = cat;
+          } else {
+            p = { itemId: it.id, cat: cat, rot: 0, z: Z_DEFAULT[cat] != null ? Z_DEFAULT[cat] : state.pano.items.length };
+            Object.assign(p, lit);
+            state.pano.items.push(p);
+          }
+          p._locked = false;
+          syncItemGeometry(it, p, cat, () => (state.pano.items.indexOf(p) < 0 || p._locked));
           closeModal();
           paint();
           toolSync();
@@ -994,10 +1042,22 @@
     toolSync();
     v.append(wrap);
   }
-  const MANNEQUIN_SHAPES = '<circle cx="150" cy="38" r="26"/><rect x="140" y="58" width="20" height="18" rx="7"/><rect x="83" y="92" width="22" height="118" rx="11"/><rect x="195" y="92" width="22" height="118" rx="11"/><path d="M118 76 L182 76 C194 76 199 88 197 102 L191 226 C189 242 182 248 170 248 L130 248 C118 248 111 242 109 226 L103 102 C101 88 106 76 118 76 Z"/><rect x="116" y="248" width="30" height="142" rx="14"/><rect x="154" y="248" width="30" height="142" rx="14"/>';
+  const MAN_BODY = '<circle cx="150" cy="34" r="22"/>' +
+    '<path d="M142 54 L158 54 L158 66 Q150 71 142 66 Z"/>' +
+    '<path d="M150 62 C130 62 118 66 111 74 C104 82 101 92 100 102 L97 150 C96 163 112 168 114 155 L118 122 L118 218 C118 236 128 246 144 246 L156 246 C172 246 182 236 182 218 L182 122 L186 155 C188 168 204 163 203 150 L200 102 C199 92 196 82 189 74 C182 66 170 62 150 62 Z"/>' +
+    '<path d="M120 246 L180 246 C186 246 188 250 188 254 L188 268 C188 276 180 278 172 278 L128 278 C120 278 112 276 112 268 L112 254 C112 250 114 246 120 246 Z"/>' +
+    '<path d="M121 276 C117 310 118 356 123 390 C124 400 136 400 137 390 C141 356 143 312 145 278 Z"/>' +
+    '<path d="M179 276 C183 310 182 356 177 390 C176 400 164 400 163 390 C159 356 157 312 155 278 Z"/>' +
+    '<rect x="111" y="392" width="36" height="15" rx="7.5"/>' +
+    '<rect x="153" y="392" width="36" height="15" rx="7.5"/>';
 
-  function mannequinSvg(fill) {
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 430"><g fill="' + fill + '">' + MANNEQUIN_SHAPES + "</g></svg>";
+  function mannequinSvg(a, b, line, sh) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 430">' +
+      '<defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="' + a + '"/><stop offset="1" stop-color="' + b + '"/>' +
+      '</linearGradient></defs>' +
+      '<ellipse cx="150" cy="418" rx="50" ry="6.5" fill="' + (sh || "#000") + '" opacity="0.13"/>' +
+      '<g fill="url(#mg)" stroke="' + (line || "none") + '" stroke-width="1.3" stroke-opacity="0.6">' + MAN_BODY + '</g></svg>';
   }
 
   function exportPngDialog() {
@@ -1069,11 +1129,14 @@
       });
     };
     if (!withMan) { drawItems(); return; }
-    const svgBlob = new Blob([mannequinSvg(dark ? "#2b303a" : "#dbd8cd")], { type: "image/svg+xml" });
+    const svgBlob = new Blob([mannequinSvg(
+      dark ? "#2b303a" : "#e4e1d7", dark ? "#1f232b" : "#c6c2b6",
+      dark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.15)", dark ? "#000000" : "#8a8578"
+    )], { type: "image/svg+xml" });
     CAM.loadImage(svgBlob).then((mimg) => {
-      const w = cv.width * 0.66;
+      const w = cv.width * 0.62;
       const h = w * 430 / 300;
-      ctx.drawImage(mimg, (cv.width - w) / 2, cv.height * 0.03, w, cv.height * 0.95);
+      ctx.drawImage(mimg, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
       return drawItems();
     });
   }

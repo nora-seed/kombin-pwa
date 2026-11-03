@@ -11,7 +11,7 @@
   --warn: #b07b18;
   --bad: #b23b34;
   --ring-track: #e2e0d8;
-  --man-sil: #d9d6cb;
+  --man-a: #e2dfd4; --man-b: #c8c4b7; --man-line: rgba(0,0,0,0.14);
   --shadow: 0 4px 18px rgba(20, 22, 28, 0.08);
 }
 [data-theme="dark"] {
@@ -24,7 +24,7 @@
   --accent: #6fb3e0;
   --accent-2: #9ccdea;
   --ring-track: #2c2f38;
-  --man-sil: #2d313b;
+  --man-a: #333947; --man-b: #23262e; --man-line: rgba(255,255,255,0.07);
   --shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
 }
 
@@ -297,14 +297,15 @@ h3 { margin: 0 0 10px; }
 .board {
   position: relative; width: 100%; max-width: 430px; margin: 0 auto;
   aspect-ratio: 3/4.2;
-  background: var(--panel);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,0.05), transparent 60%),
+    linear-gradient(180deg, var(--panel), var(--panel-2));
   border: 1px solid var(--line); border-radius: 20px;
   overflow: hidden; touch-action: none;
   box-shadow: var(--shadow);
 }
 .mannequin {
-  position: absolute; left: 17%; right: 17%; top: 3%; bottom: 2%;
-  color: var(--man-sil); opacity: 0.9;
+  position: absolute; left: 15%; right: 15%; top: 2%; bottom: 1.5%;
   pointer-events: none;
 }
 .mannequin svg { width: 100%; height: 100%; }
@@ -318,10 +319,10 @@ h3 { margin: 0 0 10px; }
   display: flex; align-items: center; justify-content: center;
   pointer-events: auto;
 }
-.slot-ghost.dis { top: 3.5%; height: 6.5%; left: 30%; right: 30%; font-size: 10px; border-radius: 999px; }
-.slot-ghost.ust { top: 12%; height: 32%; left: 26%; right: 26%; }
-.slot-ghost.alt { top: 49%; height: 37%; left: 30%; right: 30%; }
-.slot-ghost.ayakkabi { top: 87.5%; height: 8.5%; left: 38%; right: 38%; font-size: 9.5px; border-radius: 999px; }
+.slot-ghost.dis { top: 7%; height: 35%; left: 24%; right: 24%; font-size: 10px; }
+.slot-ghost.ust { top: 11.5%; height: 30%; left: 26%; right: 26%; }
+.slot-ghost.alt { top: 55%; height: 37.5%; left: 28%; right: 28%; }
+.slot-ghost.ayakkabi { top: 87%; height: 9.5%; left: 34%; right: 34%; font-size: 9.5px; border-radius: 999px; }
 .slot-ghost:active { border-color: var(--accent); color: var(--accent); }
 
 .pano-hint {
@@ -335,7 +336,8 @@ h3 { margin: 0 0 10px; }
   position: absolute; touch-action: none;
   transition: box-shadow 0.12s;
 }
-.pano-item img { width: 100%; pointer-events: none; -webkit-user-drag: none; }
+.pano-item img { width: 100%; pointer-events: none; -webkit-user-drag: none; filter: drop-shadow(0 5px 9px rgba(0,0,0,0.16)); }
+[data-theme="dark"] .pano-item img { filter: drop-shadow(0 5px 9px rgba(0,0,0,0.45)); }
 .pano-ph {
   font-size: 30px; display: flex; align-items: center; justify-content: center;
 }
