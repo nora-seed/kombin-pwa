@@ -3,33 +3,42 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#17405f">
-<meta name="description" content="Kişisin: kıyafetler kamera ile dolabında, renk motoru kombin önerir, panoda yerleştirirsin.">
+<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem("kombin-theme");if(t){document.documentElement.dataset.theme=t}}catch(e){}</script>
+<meta name="description" content="Kıyafetlerini fotoğrafla dolabına ekle; renk kurallarına göre kombin önerileri al, manken panosunda birleştir.">
 <title>Kombin — Kişisel Gardırop Stüdyosu</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Kombin">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="splash" aria-hidden="true">
+  <div class="splash-mark">🧥</div>
+  <div class="splash-name">Kombin</div>
+  <div class="splash-sub">Kişisel gardırop stüdyosu</div>
+  <div class="splash-bar"><i></i></div>
+</div>
 <header class="topbar">
   <div class="logo">🧥 Kombin <small>· gardırobum</small></div>
   <button id="menuBtn" class="icon-btn" aria-label="Yedek ve ayarlar">⋯</button>
   <button id="themeBtn" class="icon-btn" aria-label="Tema">◐</button>
 </header>
 
-<main id="view"></main>
+<main id="view" aria-label="Uygulama içeriği"></main>
 
-<nav class="tabbar">
+<nav class="tabbar" aria-label="Ana gezinme">
   <button data-nav="dolap" class="active"><span>🧺</span>Dolap</button>
   <button data-nav="kombin"><span>✨</span>Kombin</button>
   <button data-nav="pano"><span>🎨</span>Pano</button>
   <button data-nav="rehber"><span>📚</span>Rehber</button>
 </nav>
 
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="modalRoot"></div>
 
 <script src="colors.js"></script>
@@ -37,6 +46,10 @@
 <script src="camera.js"></script>
 <script src="app.js"></script>
 <script>
+setTimeout(function () {
+  var sp = document.getElementById('splash');
+  if (sp) { sp.classList.add('out'); setTimeout(function () { sp.remove(); }, 420); }
+}, 6000);
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(function () {});
 }

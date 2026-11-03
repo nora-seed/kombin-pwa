@@ -66,12 +66,21 @@
     lastComboKeys: new Set(),
   };
 
-  function toast(msg) {
+  function buzz(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { }
+  }
+
+  function toast(msg, kind) {
     const t = $("#toast");
-    t.textContent = msg;
+    const ico = kind === "err" ? "⚠️" : kind === "ok" ? "✅" : "";
+    t.className = "toast" + (kind ? " " + kind : "");
+    t.textContent = "";
+    if (ico) t.append(el("span", "t-ico", ico));
+    t.append(el("span", "t-txt", msg));
+    void t.offsetWidth;
     t.classList.add("show");
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.remove("show"), 2200);
+    toast._t = setTimeout(() => t.classList.remove("show"), 2400);
   }
 
   function u(item) {
@@ -90,36 +99,67 @@
   }
 
   const modalRoot = () => $("#modalRoot");
+  let modalPrevFocus = null;
 
   function openModal(node, cls) {
     const wrap = el("div", "modal-open");
+    if (cls) wrap.classList.add(cls);
     const back = el("div", "modal-back");
-    back.onclick = closeModal;
+    back.onclick = () => closeModal(wrap);
+    node.setAttribute("role", "dialog");
+    node.setAttribute("aria-modal", "true");
     wrap.append(back, node);
     modalRoot().appendChild(wrap);
+    document.body.classList.add("modal-lock");
+    if (!modalPrevFocus) modalPrevFocus = document.activeElement;
     requestAnimationFrame(() => wrap.classList.add("on"));
+    const first = node.querySelector("input, select, textarea, button");
+    if (first) setTimeout(() => { try { if (document.contains(first)) first.focus({ preventScroll: true }); } catch (e) { } }, 80);
     return wrap;
   }
 
-  function closeModal() {
-    const w = $("#modalRoot").lastElementChild;
+  function closeModal(wrap) {
+    const w = wrap || modalRoot().lastElementChild;
     if (!w) return;
     w.classList.remove("on");
-    setTimeout(() => w.remove(), 180);
+    const cb = w._onClose;
+    w._onClose = null;
+    setTimeout(() => {
+      if (w.parentElement) w.remove();
+      if (!modalRoot().lastElementChild) {
+        document.body.classList.remove("modal-lock");
+        if (modalPrevFocus && document.contains(modalPrevFocus)) {
+          try { modalPrevFocus.focus({ preventScroll: true }); } catch (e) { }
+        }
+        modalPrevFocus = null;
+      }
+      if (cb) cb();
+    }, 180);
   }
 
-  function confirmDlg(title, text) {
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const w = modalRoot().lastElementChild;
+    if (w) closeModal(w);
+  });
+
+  function confirmDlg(title, text, opts) {
+    opts = opts || {};
     return new Promise((res) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; res(v); };
       const m = el("div", "modal mini");
-      m.append(el("h3", "", title), el("p", "muted", text));
+      m.append(el("h3", "", title), el("p", "muted confirm-text", text));
       const row = el("div", "btn-row");
-      const no = el("button", "btn ghost", "Vazgeç");
-      const yes = el("button", "btn danger", "Evet");
-      no.onclick = () => { closeModal(); res(false); };
-      yes.onclick = () => { closeModal(); res(true); };
+      const no = el("button", "btn ghost", opts.cancel || "Vazgeç");
+      const yes = el("button", "btn danger", opts.confirm || "Evet");
       row.append(no, yes);
       m.append(row);
-      openModal(m);
+      const wrap = openModal(m);
+      no.onclick = () => { closeModal(wrap); finish(false); };
+      yes.onclick = () => { closeModal(wrap); finish(true); };
+      wrap._onClose = () => finish(false);
+      setTimeout(() => { try { no.focus({ preventScroll: true }); } catch (e) { } }, 90);
     });
   }
 
@@ -127,6 +167,8 @@
     return Promise.all([DB.ITEMS.all(), DB.OUTFITS.all()]).then(([items, outfits]) => {
       state.items = items.sort((a, b) => b.createdAt - a.createdAt);
       state.outfits = outfits.sort((a, b) => b.createdAt - a.createdAt);
+      const alive = new Set(state.items.map((i) => i.id));
+      [...state.urls.keys()].forEach((id) => { if (!alive.has(id)) revU(id); });
     });
   }
 
@@ -135,10 +177,22 @@
     return it.colorInfo;
   }
 
+  const VIEW_TITLES = { dolap: "Dolap", kombin: "Kombin öner", pano: "Pano", rehber: "Renk rehberi" };
+
   function navigate(view) {
     state.view = view;
-    $$(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
+    $$(".tabbar button").forEach((b) => {
+      const on = b.dataset.nav === view;
+      b.classList.toggle("active", on);
+      if (on) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+    document.title = (VIEW_TITLES[view] || "Kombin") + " — Kombin";
     render();
+    const v = $("#view");
+    v.classList.remove("view-enter");
+    void v.offsetWidth;
+    v.classList.add("view-enter");
     window.scrollTo(0, 0);
   }
 
@@ -214,6 +268,8 @@
           const img = el("img");
           img.src = url;
           img.alt = it.name;
+          img.loading = "lazy";
+          img.decoding = "async";
           imgBox.append(img);
         } else {
           imgBox.append(el("div", "tile-ph", CATS[it.category].icon));
@@ -226,11 +282,14 @@
         const star = el("span", "tile-star" + (it.fav ? " on" : ""), "★");
         star.setAttribute("role", "button");
         star.setAttribute("aria-label", "Favori");
+        star.tabIndex = 0;
+        star.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); star.click(); } };
         star.onclick = (e) => {
           e.stopPropagation();
           it.fav = it.fav ? 0 : 1;
           DB.ITEMS.put(Object.assign({}, it)).then(refresh).then(() => {
-            toast(it.fav ? "Favorilere eklendi" : "Favoriden çıkarıldı");
+            buzz(10);
+            toast(it.fav ? "Favorilere eklendi" : "Favoriden çıkarıldı", "ok");
             render();
           });
         };
@@ -243,10 +302,12 @@
     }
     renderGrid();
 
-    const fab = el("button", "fab", "+");
-    fab.setAttribute("aria-label", "Kıyafet ekle");
-    fab.onclick = () => itemEditor(null);
-    v.append(fab);
+    if (state.items.length) {
+      const fab = el("button", "fab", "+");
+      fab.setAttribute("aria-label", "Kıyafet ekle");
+      fab.onclick = () => itemEditor(null);
+      v.append(fab);
+    }
   }
 
   function swatchModal(current, onPick) {
@@ -274,9 +335,9 @@
 
   function deleteItemCascade(id) {
     const it = state.items.find((x) => x.id === id);
-    if (!it) return Promise.resolve();
+    if (!it) return Promise.resolve(false);
     const touched = state.outfits.filter((o) => (o.layout || []).some((p) => p.itemId === id));
-    return confirmDlg("Kıyafet silinsin mi?", "'" + (it.name || "bu kıyafet") + "' dolaptan ve " + touched.length + " kayıtlı kombinin yerleşiminden çıkarılacak.").then((ok) => {
+    return confirmDlg("Kıyafet silinsin mi?", "'" + (it.name || "bu kıyafet") + "' dolaptan ve " + touched.length + " kayıtlı kombinin yerleşiminden çıkarılacak.", { confirm: "Sil" }).then((ok) => {
       if (!ok) return Promise.resolve(false);
       return DB.ITEMS.del(id).then(() => Promise.all(touched.map((o) => {
         const o2 = Object.assign({}, o);
@@ -288,10 +349,11 @@
         state.pano.sel = null;
         return refresh();
       }).then(() => {
-        toast("Silindi · " + touched.length + " kombin güncellendi");
+        buzz(18);
+        toast("Silindi · " + touched.length + " kombin güncellendi", "ok");
         render();
         return true;
-      }).catch(() => { toast("Silme sırasında hata oldu"); return false; });
+      }).catch(() => { toast("Silme sırasında hata oldu", "err"); return false; });
     });
   }
 
@@ -311,7 +373,7 @@
     head.append(dots, titleEl);
     const body = el("div", "wiz-body");
     m.append(head, body);
-    openModal(m);
+    const wizWrap = openModal(m);
 
     let step = 0;
     let busy = false;
@@ -354,7 +416,7 @@
     const acquireCam = () => {
       CAM.capture().then((blob) => {
         if (blob === undefined) return;
-        if (!blob) { toast("Kamera burada açılamadı — galeriden dene"); return; }
+        if (!blob) { toast("Kamera burada açılamadı — galeriden dene", "err"); return; }
         runEdit(blob);
       });
     };
@@ -505,7 +567,7 @@
         rec.colorInfo = draft.colorInfo || C.classify(draft.color);
         rec.colorName = rec.colorInfo.name;
         rec.createdAt = existing ? existing.createdAt : Date.now();
-        DB.ITEMS.put(rec).then(() => refresh()).then(() => { closeModal(); render(); toast(isNew ? "Dolaba eklendi 🧺" : "Güncellendi ✓"); }).catch(() => { toast("Kaydedilemedi — yer açın ya da yeniden deneyin"); }).then(() => { busy = false; save.disabled = false; });
+        DB.ITEMS.put(rec).then(() => refresh()).then(() => { closeModal(); buzz(14); render(); toast(isNew ? "Dolaba eklendi 🧺" : "Güncellendi ✓", "ok"); }).catch(() => { toast("Kaydedilemedi — yer açın ya da yeniden deneyin", "err"); }).then(() => { busy = false; save.disabled = false; });
       };
       bRow.append(bBack, save);
       form.append(bRow);
@@ -513,7 +575,7 @@
       if (!isNew) {
         const dRow = el("div", "btn-row");
         const del = el("button", "btn danger ghost full", "🗑️ Bu kıyafeti sil");
-        del.onclick = () => deleteItemCascade(existing.id).then((deleted) => { if (deleted) closeModal(); });
+        del.onclick = () => deleteItemCascade(existing.id).then((deleted) => { if (deleted) closeModal(wizWrap); });
         dRow.append(del);
         form.append(dRow);
       }
@@ -532,6 +594,8 @@
       if (!it || !u(it)) return;
       const img = el("img");
       img.src = u(it);
+      img.alt = it.name || "";
+      img.decoding = "async";
       const lit = fitLayout(it, slot, 0.75);
       img.style.left = lit.x + "%";
       img.style.top = lit.y + "%";
@@ -565,6 +629,9 @@
         if (url) {
           const img = el("img");
           img.src = url;
+          img.alt = it.name || "";
+          img.loading = "lazy";
+          img.decoding = "async";
           ph.append(img);
         } else ph.append(el("span", "", CATS[it.category].icon));
         t.append(ph, el("span", "", (it.name || "").slice(0, 18)));
@@ -658,6 +725,9 @@
         if (o.thumb) {
           const img = el("img");
           img.src = o.thumb;
+          img.alt = o.name || "Kombin";
+          img.loading = "lazy";
+          img.decoding = "async";
           th.append(img);
         } else th.append(el("span", "", "🧣"));
         row.append(th);
@@ -666,9 +736,14 @@
         row.append(info);
         const btns = el("div", "btn-sm");
         const open = el("button", "icon-btn", "▶️");
+        open.setAttribute("aria-label", "Kombini panoda aç");
         open.onclick = () => ensurePanoClear(() => { state.pano.items = JSON.parse(JSON.stringify(o.layout || [])); state.pano.sel = null; navigate("pano"); toast("Panoda açıldı"); });
-        const del = el("button", "icon-btn", "🗑️");
-        del.onclick = () => confirmDlg("Sil?", "Kayıtlı kombin silinsin mi?").then((ok2) => { if (ok2) DB.OUTFITS.del(o.id).then(refresh).then(render); });
+        const del = el("button", "icon-btn danger", "🗑️");
+        del.setAttribute("aria-label", "Kombini sil");
+        del.onclick = () => confirmDlg("Kombin silinsin mi?", "Kayıtlı kombin kalıcı olarak silinecek.", { confirm: "Sil" }).then((ok2) => {
+          if (!ok2) return;
+          DB.OUTFITS.del(o.id).then(refresh).then(render).then(() => { buzz(14); toast("Kombin silindi", "ok"); });
+        });
         btns.append(open, del);
         row.append(btns);
         list2.append(row);
@@ -715,7 +790,7 @@
       })(),
       thumb: null,
     };
-    return renderThumb(o).then((t) => { o.thumb = t; return DB.OUTFITS.put(o); }).then(refresh).then(() => toast("Kombin kaydedildi 💾"));
+    return renderThumb(o).then((t) => { o.thumb = t; return DB.OUTFITS.put(o); }).then(refresh).then(() => { buzz(14); toast("Kombin kaydedildi 💾", "ok"); });
   }
 
   function renderThumb(o) {
@@ -864,6 +939,9 @@
     const tkFront = el("button", "icon-btn", "⬆️");
     const tkBack = el("button", "icon-btn", "⬇️");
     const tkDel = el("button", "icon-btn danger", "🗑️");
+    [[tkZoomOut, "Küçült"], [tkZoomIn, "Büyüt"], [tkRotL, "Sola döndür"],
+      [tkRotR, "Sağa döndür"], [tkFront, "Öne al"], [tkBack, "Arkaya al"],
+      [tkDel, "Panodan kaldır"]].forEach(([b, l]) => b.setAttribute("aria-label", l));
     tkZoomOut.onclick = () => zoomSel(1 / 1.15);
     tkZoomIn.onclick = () => zoomSel(1.15);
     tkRotL.onclick = () => rotSel(-15);
@@ -971,7 +1049,7 @@
           layout: JSON.parse(JSON.stringify(state.pano.items)),
           thumb: null,
         };
-        renderThumb(o).then((t) => { o.thumb = t; return DB.OUTFITS.put(o); }).then(refresh).then(() => { closeModal(); toast("Kaydedildi 💾"); });
+        renderThumb(o).then((t) => { o.thumb = t; return DB.OUTFITS.put(o); }).then(refresh).then(() => { closeModal(); buzz(14); toast("Kombin kaydedildi 💾", "ok"); });
       };
       row.append(no, ok);
       m.append(row);
@@ -992,6 +1070,9 @@
         if (u(it)) {
           const img = el("img");
           img.src = u(it);
+          img.alt = it.name || "";
+          img.loading = "lazy";
+          img.decoding = "async";
           box.append(img);
     } else {
       box.append(el("div", "tile-ph", CATS[it.category].icon));
@@ -1124,7 +1205,7 @@
           a.download = "kombin-" + Date.now() + ".png";
           a.click();
           setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-          toast("PNG indirildi");
+          toast("PNG indirildi", "ok");
         }, "image/png");
       });
     };
@@ -1240,7 +1321,7 @@
         a.download = "kombin-yedek-" + new Date().toISOString().slice(0, 10) + ".json";
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-        toast("Yedek indirildi");
+        toast("Yedek indirildi", "ok");
       });
     };
     bImp.onclick = () => {
@@ -1249,32 +1330,63 @@
       inp.accept = "application/json";
       inp.onchange = () => {
         if (!inp.files[0]) { inp.remove(); return; }
-        inp.files[0].text().then((t) => DB.importJSON(t, false)).then(refresh).then(() => { closeModal(); render(); toast("Yedek yüklendi"); }).catch(() => toast("Yedek dosyası hatalı"));
+        inp.files[0].text().then((t) => DB.importJSON(t, false)).then(refresh).then(() => { closeModal(bkWrap); render(); toast("Yedek yüklendi", "ok"); }).catch(() => toast("Yedek dosyası hatalı", "err"));
         inp.remove();
       };
       inp.click();
     };
     bWipe.onclick = () => {
-      confirmDlg("Tüm veriler silinsin mi?", "Dolap ve kombinler kalıcı olarak silinir. Önce yedek almayı düşün.").then((ok) => {
-        if (ok) DB.wipe().then(() => { state.items = []; state.outfits = []; state.pano.items = []; closeModal(); refresh().then(render); toast("Yok edildi… kolları sıva 🧺"); });
+      confirmDlg("Tüm veriler silinsin mi?", "Dolap ve kombinler kalıcı olarak silinir. Önce yedek almayı düşün.", { confirm: "Tümünü sil" }).then((ok) => {
+        if (ok) DB.wipe().then(() => { state.items = []; state.outfits = []; state.pano.items = []; closeModal(bkWrap); refresh().then(render); toast("Yok edildi… kolları sıva 🧺", "ok"); });
       });
     };
     m.append(bExp, bImp, themeL, bWipe);
-    openModal(m);
+    const bkWrap = openModal(m);
   }
 
   function setTheme(t) {
     document.documentElement.dataset.theme = t;
     localStorage.setItem("kombin-theme", t);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", t === "dark" ? "#1d2027" : "#ffffff");
+    const btn = $("#themeBtn");
+    if (btn) {
+      btn.setAttribute("aria-label", t === "dark" ? "Açık temaya geç" : "Koyu temaya geç");
+      btn.textContent = t === "dark" ? "☀️" : "🌙";
+    }
+  }
+
+  function hideSplash() {
+    const sp = $("#splash");
+    if (!sp) return;
+    sp.classList.add("out");
+    setTimeout(() => sp.remove(), 420);
   }
 
   function init() {
     setTheme(localStorage.getItem("kombin-theme") || "light");
-    $("#themeBtn").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    $("#themeBtn").onclick = () => {
+      setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+      buzz(8);
+    };
     $("#menuBtn").onclick = backupMenu;
-    $$(".tabbar button").forEach((b) => { b.onclick = () => navigate(b.dataset.nav); });
-    refresh().then(render);
+    const nav = $(".tabbar");
+    if (nav) nav.setAttribute("aria-label", "Ana gezinme");
+    $$(".tabbar button").forEach((b) => {
+      b.onclick = () => navigate(b.dataset.nav);
+      if (VIEW_TITLES[b.dataset.nav]) b.setAttribute("aria-label", VIEW_TITLES[b.dataset.nav]);
+    });
+    refresh().then(() => {
+      render();
+      setTimeout(hideSplash, 260);
+    }).catch(() => {
+      hideSplash();
+      toast("Veriler yüklenemedi — sayfayı yenile", "err");
+    });
   }
+
+  window.addEventListener("error", () => toast("Beklenmeyen bir hata oldu", "err"));
+  window.addEventListener("unhandledrejection", () => toast("İşlem tamamlanamadı", "err"));
 
   window.App = { state: state, render: render, navigate: navigate, refresh: refresh };
   document.addEventListener("DOMContentLoaded", init);
