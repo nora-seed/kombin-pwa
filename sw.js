@@ -1,4 +1,4 @@
-const CACHE = "kombin-v2";
+const CACHE = "kombin-v3";
 const PRECACHE = [
   "./",
   "index.html",

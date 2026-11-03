@@ -200,6 +200,16 @@
         const label = el("div", "tile-label", it.name);
         const badge = el("span", "badge", CATS[it.category].icon);
         const star = el("span", "tile-star" + (it.fav ? " on" : ""), "★");
+        star.setAttribute("role", "button");
+        star.setAttribute("aria-label", "Favori");
+        star.onclick = (e) => {
+          e.stopPropagation();
+          it.fav = it.fav ? 0 : 1;
+          DB.ITEMS.put(Object.assign({}, it)).then(refresh).then(() => {
+            toast(it.fav ? "Favorilere eklendi" : "Favoriden çıkarıldı");
+            render();
+          });
+        };
         tile.append(imgBox, label);
         imgBox.append(dot, badge, star);
         tile.onclick = () => itemEditor(it);
@@ -229,174 +239,264 @@
     m.append(grid);
     openModal(m);
   }
+  function uid() {
+    return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2);
+  }
+
+  function ensurePanoClear(next) {
+    if (!state.pano.items.length) return next();
+    confirmDlg("Pano değişecek", "Panoda yerleşim var; yeni seçim üzerine yazacak. Kaydetmek istersen önce panodan kaydet.").then((ok) => { if (ok) next(); });
+  }
+
+  function deleteItemCascade(id) {
+    const it = state.items.find((x) => x.id === id);
+    if (!it) return Promise.resolve();
+    const touched = state.outfits.filter((o) => (o.layout || []).some((p) => p.itemId === id));
+    return confirmDlg("Kıyafet silinsin mi?", "'" + (it.name || "bu kıyafet") + "' dolaptan ve " + touched.length + " kayıtlı kombinin yerleşiminden çıkarılacak.").then((ok) => {
+      if (!ok) return Promise.resolve(false);
+      return DB.ITEMS.del(id).then(() => Promise.all(touched.map((o) => {
+        const o2 = Object.assign({}, o);
+        o2.layout = (o.layout || []).filter((p) => p.itemId !== id);
+        return DB.OUTFITS.put(o2);
+      }))).then(() => {
+        revU(id);
+        state.pano.items = state.pano.items.filter((p) => p.itemId !== id);
+        state.pano.sel = null;
+        return refresh();
+      }).then(() => {
+        toast("Silindi · " + touched.length + " kombin güncellendi");
+        render();
+        return true;
+      }).catch(() => { toast("Silme sırasında hata oldu"); return false; });
+    });
+  }
 
   function itemEditor(existing) {
     const isNew = !existing;
     const draft = existing ? Object.assign({}, existing) : {
-      id: (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)),
-      name: "", category: "ust", color: "#8a8d8f", colorName: "Gri",
-      colorInfo: null, seasons: [], fav: 0, img: null, alpha: 0, createdAt: Date.now(), seasonsOld: null,
+      id: uid(), name: "", category: "ust", color: "#8a8d8f", colorName: "Gri",
+      colorInfo: null, seasons: [], fav: 0, brand: "", beden: "", note: "",
+      img: null, alpha: 0, createdAt: Date.now(),
     };
     draft.colorInfo = draft.colorInfo || C.classify(draft.color);
 
-    const m = el("div", "modal item-modal");
-    const photo = el("div", "item-photo");
-    const photoBtns = el("div", "item-photo-btns");
-    const bCam = el("button", "mini-btn", "📷 Kamera");
-    const bFile = el("button", "mini-btn", "🖼️ Galeri");
-    photoBtns.append(bCam, bFile);
-    photo.append(photoBtns);
+    const m = el("div", "modal wizard");
+    const head = el("div", "wiz-head");
+    const dots = el("div", "wiz-dots");
+    const titleEl = el("div", "wiz-title", "1/3 · Fotoğraf");
+    head.append(dots, titleEl);
+    const body = el("div", "wiz-body");
+    m.append(head, body);
+    openModal(m);
 
-    const applyPhoto = (blob, alpha) => {
-      if (!blob) return;
-      CAM.loadImage(blob).then((img) => {
+    let step = 0;
+    let busy = false;
+
+    function drawHead() {
+      dots.innerHTML = "";
+      for (let i = 0; i < 3; i++) {
+        const d = el("i");
+        if (i < step) d.className = "done";
+        else if (i === step) d.className = "on";
+        dots.append(d);
+      }
+      titleEl.textContent = (step + 1) + "/3 · " + ["Fotoğraf", "Temizleme", "Bilgiler"][step];
+    }
+
+    function applyProcessed(r) {
+      CAM.loadImage(r.blob).then((img) => {
         const cv = CAM.toBaseCanvas(img);
         const hex = CAM.dominantColor(cv);
         const info = C.classify(hex);
-        draft.img = blob;
-        draft.alpha = alpha ? 1 : 0;
+        draft.img = r.blob;
+        draft.alpha = r.alpha ? 1 : 0;
         draft.color = hex;
         draft.colorName = info.name;
         draft.colorInfo = info;
-        draft._renamed = draft._renamed || !!draft.name;
         if (!draft.name) draft.name = info.name + " " + CATS[draft.category].n.toLowerCase();
-        drawPhoto();
-        formSync();
+        drawStep();
       });
-    };
-    bCam.onclick = () => {
+    }
+
+    function runEdit(blob) {
+      setDots();
+      CAM.edit(blob).then((r) => {
+        if (r) applyProcessed(r);
+        else { step = 0; drawStep(); }
+      });
+    }
+    function setDots() { drawHead(); }
+
+    const acquireCam = () => {
       CAM.capture().then((blob) => {
         if (blob === undefined) return;
-        if (!blob) {
-          CAM.pickFile().then((f) => { if (f) applyPhoto(f); });
-          return;
-        }
-        CAM.edit(blob).then((r) => { if (r) applyPhoto(r.blob, r.alpha); });
+        if (!blob) { toast("Kamera burada açılamadı — galeriden dene"); return; }
+        runEdit(blob);
       });
     };
-    bFile.onclick = () => {
+    const acquireFile = () => {
       CAM.pickFile().then((f) => {
         if (!f) return;
-        CAM.edit(f).then((r) => { if (r) applyPhoto(r.blob, r.alpha); });
+        runEdit(f);
       });
     };
 
-    function drawPhoto() {
-      photo.innerHTML = "";
-      photo.className = "item-photo filled";
+    function drawStep() {
+      drawHead();
+      body.innerHTML = "";
+      if (step === 0) drawPhotoStep();
+      else drawFormStep();
+    }
+
+    function drawPhotoStep() {
+      const box = el("div", "wiz-photo");
+      if (draft.img) {
+        const img = el("img", "prev");
+        img.src = URL.createObjectURL(draft.img);
+        img.onload = () => URL.revokeObjectURL(img.src);
+        box.append(img);
+        const row = el("div", "btn-row center");
+        const bRe = el("button", "btn ghost", "✨ Tekrar düzenle");
+        bRe.onclick = () => runEdit(draft.img);
+        const bChg = el("button", "btn ghost", "↺ Farklı fotoğraf");
+        bChg.onclick = () => { draft.img = null; drawStep(); };
+        row.append(bRe, bChg);
+        box.append(row);
+        const next = el("button", "btn primary big", "▶ Bilgilere geç");
+        next.onclick = () => { step = 2; drawStep(); };
+        box.append(next);
+      } else {
+        box.append(el("div", "wiz-ph-ico", "👕"));
+        box.append(el("p", "muted center", "Kıyafeti düz bir zeminde çek — sistem zemini otomatik temizleyip kenarlarını keser."));
+        const b1 = el("button", "btn primary big", "📷 Kamera ile Çek");
+        const b2 = el("button", "btn ghost big", "🖼️ Galeriden Seç");
+        b1.onclick = acquireCam;
+        b2.onclick = acquireFile;
+        box.append(b1, b2);
+        box.append(el("p", "tiny muted center", "Fotoğraf isteğe bağlı — atlayıp renk kartı olarak da kaydedebilirsin."));
+      }
+      body.append(box);
+    }
+
+    function drawFormStep() {
+      const form = el("div", "item-form");
+      const phRow = el("div", "form-photo");
       if (draft.img) {
         const img = el("img");
-        if (draft._url) URL.revokeObjectURL(draft._url);
-        draft._url = URL.createObjectURL(draft.img);
-        img.src = draft._url;
-        photo.append(img, photoBtns);
-        const re = el("button", "mini-btn re", "✨ Düzenle");
-        re.onclick = () => CAM.edit(draft.img).then((r) => { if (r) applyPhotoWithColor(r.blob, r.alpha); });
-        photo.append(re);
+        img.src = URL.createObjectURL(draft.img);
+        img.onload = () => URL.revokeObjectURL(img.src);
+        const bEd = el("button", "mini-btn", "✨ Düzenle");
+        bEd.onclick = () => CAM.edit(draft.img).then((r) => { if (r) applyProcessed(r); });
+        phRow.append(img, bEd);
       } else {
-        photo.className = "item-photo";
-        photo.append(el("div", "ph", "👕"), el("p", "muted", "Fotoğraf ekle (isteğe bağlı)"), photoBtns);
+        const bAdd = el("button", "mini-btn", "+ Fotoğraf ekle");
+        bAdd.onclick = () => { step = 0; drawStep(); };
+        phRow.append(bAdd);
       }
-    }
-    function applyPhotoWithColor(blob, alpha) {
-      applyPhoto(blob, alpha);
-    }
+      form.append(phRow);
 
-    const form = el("div", "item-form");
-    const name = el("input");
-    name.type = "text";
-    name.placeholder = "Kıyafet adı";
-    name.value = draft.name || "";
-    name.oninput = () => { draft.name = name.value; };
+      const name = el("input");
+      name.type = "text";
+      name.placeholder = "örn. Zümrüt gömlek";
+      name.value = draft.name || "";
+      name.oninput = () => { draft.name = name.value; };
+      form.append(el("label", "f-lbl", "Ad"), name);
 
-    const catRow = el("div", "chips");
-    Object.keys(CATS).forEach((k) => {
-      const b = el("button", "chip" + (draft.category === k ? " active" : ""), CATS[k].icon + " " + CATS[k].n);
-      b.onclick = () => { draft.category = k; $$(".chip", catRow).forEach((x) => x.classList.remove("active")); b.classList.add("active"); };
-      catRow.append(b);
-    });
+      const catRow = el("div", "chips");
+      Object.keys(CATS).forEach((k) => {
+        const b = el("button", "chip" + (draft.category === k ? " active" : ""), CATS[k].icon + " " + CATS[k].n);
+        b.onclick = () => { draft.category = k; $$(".chip", catRow).forEach((x) => x.classList.remove("active")); b.classList.add("active"); };
+        catRow.append(b);
+      });
+      form.append(el("label", "f-lbl", "Kategori"), catRow);
 
-    const colorRow = el("div", "color-row");
-    const colorDot = el("button", "big-dot");
-    const colorLbl = el("span", "color-lbl");
-    colorDot.onclick = () => {
-      swatchModal(draft.color, (p) => {
+      form.append(el("label", "f-lbl", "Renk"), el("div", "tiny muted", "Fotograftan otomatik algılandı — dokunup düzeltebilirsin"));
+      const colorRow = el("div", "color-row");
+      const colorDot = el("button", "big-dot");
+      const colorLbl = el("span", "color-lbl", draft.colorName);
+      colorDot.style.background = draft.color;
+      colorDot.onclick = () => swatchModal(draft.color, (p) => {
         draft.color = p.hex;
         const info = C.classify(p.hex);
         if (p.key) { info.fam = p.key; info.name = p.name || C.FAMILIES[p.key].name; }
         draft.colorName = info.name;
         draft.colorInfo = info;
-        formSync();
+        colorDot.style.background = draft.color;
+        colorLbl.textContent = draft.colorName;
       });
-    };
-    colorRow.append(colorDot, colorLbl);
+      colorRow.append(colorDot, colorLbl);
+      form.append(colorRow);
 
-    const seasonRow = el("div", "chips");
-    SEASONS.forEach((s) => {
-      const b = el("button", "chip sm" + (draft.seasons.includes(s) ? " active" : ""), s);
-      b.onclick = () => {
-        draft.seasons = draft.seasons.includes(s) ? draft.seasons.filter((x) => x !== s) : draft.seasons.concat(s);
-        b.classList.toggle("active");
+      const grid = el("div", "f-grid");
+      const brand = el("input");
+      brand.type = "text";
+      brand.placeholder = "Marka";
+      brand.value = draft.brand || "";
+      brand.oninput = () => { draft.brand = brand.value; };
+      const beden = el("input");
+      beden.type = "text";
+      beden.placeholder = "Beden (M, 32…)";
+      beden.value = draft.beden || "";
+      beden.oninput = () => { draft.beden = beden.value; };
+      grid.append(brand, beden);
+      form.append(el("label", "f-lbl", "Marka · Beden"), grid);
+
+      const note = el("textarea");
+      note.rows = 2;
+      note.placeholder = "Not — çekmece, kumaş, bakım…";
+      note.value = draft.note || "";
+      note.oninput = () => { draft.note = note.value; };
+      form.append(el("label", "f-lbl", "Not"), note);
+
+      const seasonRow = el("div", "chips");
+      SEASONS.forEach((s) => {
+        const b = el("button", "chip sm" + (draft.seasons.includes(s) ? " active" : ""), s);
+        b.onclick = () => {
+          draft.seasons = draft.seasons.includes(s) ? draft.seasons.filter((x) => x !== s) : draft.seasons.concat(s);
+          b.classList.toggle("active");
+        };
+        seasonRow.append(b);
+      });
+      form.append(el("label", "f-lbl", "Sezon"), seasonRow);
+
+      const favRow = el("label", "fav-row");
+      const favInp = el("input");
+      favInp.type = "checkbox";
+      favInp.checked = !!draft.fav;
+      favInp.onchange = () => { draft.fav = favInp.checked ? 1 : 0; };
+      favRow.append(favInp, el("span", "", "⭐ Favori (kombinlerde önceliklenir)"));
+      form.append(favRow);
+
+      const bRow = el("div", "btn-row");
+      const bBack = el("button", "btn ghost", "◀ Fotoğraf");
+      bBack.onclick = () => { step = 0; drawStep(); };
+      const save = el("button", "btn primary", isNew ? "Dolaba ekle ✓" : "Kaydet ✓");
+      save.onclick = () => {
+        if (busy) return;
+        busy = true;
+        save.disabled = true;
+        save.textContent = "Kaydediliyor…";
+        const rec = Object.assign({}, draft);
+        rec.name = (draft.name || "").trim() || ((draft.colorName || "Kıyafet") + " " + CATS[draft.category].n.toLowerCase());
+        rec.colorInfo = draft.colorInfo || C.classify(draft.color);
+        rec.colorName = rec.colorInfo.name;
+        rec.createdAt = existing ? existing.createdAt : Date.now();
+        DB.ITEMS.put(rec).then(() => refresh()).then(() => { closeModal(); render(); toast(isNew ? "Dolaba eklendi 🧺" : "Güncellendi ✓"); }).catch(() => { toast("Kaydedilemedi — yer açın ya da yeniden deneyin"); }).then(() => { busy = false; save.disabled = false; });
       };
-      seasonRow.append(b);
-    });
+      bRow.append(bBack, save);
+      form.append(bRow);
 
-    const favRow = el("label", "fav-row");
-    const favInp = el("input");
-    favInp.type = "checkbox";
-    favInp.checked = !!draft.fav;
-    favInp.onchange = () => { draft.fav = favInp.checked ? 1 : 0; };
-    favRow.append(favInp, el("span", "", "⭐ Favori (kombinlerde önceliklenir)"));
-
-    const btnRow = el("div", "btn-row");
-    const del = el("button", "btn danger ghost", "Sil");
-    const cancel = el("button", "btn ghost", "Vazgeç");
-    const save = el("button", "btn primary", "Kaydet");
-    btnRow.append(del, cancel, save);
-
-    form.append(el("label", "f-lbl", "Ad"), name, el("label", "f-lbl", "Kategori"), catRow, el("label", "f-lbl", "Renk"), colorRow, el("label", "f-lbl", "Sezon"), seasonRow, favRow, btnRow);
-    m.append(photo, form);
-    openModal(m);
-
-    function formSync() {
-      colorDot.style.background = draft.color;
-      colorLbl.textContent = draft.colorName;
-      name.value = draft.name || "";
-      drawPhotoSoft();
-    }
-    function drawPhotoSoft() {
-      const old = photo.querySelector("img");
-      if (old && draft.img) {
-        if (draft._url) URL.revokeObjectURL(draft._url);
-        draft._url = URL.createObjectURL(draft.img);
-        old.src = draft._url;
+      if (!isNew) {
+        const dRow = el("div", "btn-row");
+        const del = el("button", "btn danger ghost full", "🗑️ Bu kıyafeti sil");
+        del.onclick = () => deleteItemCascade(existing.id).then((deleted) => { if (deleted) closeModal(); });
+        dRow.append(del);
+        form.append(dRow);
       }
+      body.append(form);
     }
 
-    drawPhoto();
-    formSync();
-
-    cancel.onclick = closeModal;
-    del.style.display = isNew ? "none" : "";
-    del.onclick = () => {
-      confirmDlg("Sil?", "'" + (draft.name || "bu kıyafet") + "' dolaptan kaldırılacak.").then((ok) => {
-        if (!ok) return;
-        DB.ITEMS.del(existing.id).then(() => { revU(existing.id); refresh().then(() => { closeModal(); render(); toastSilindi(); }); });
-      });
-    };
-    function toastSilindi() { toast("Silindi"); }
-    save.onclick = () => {
-      const rec = Object.assign({}, draft);
-      rec.name = (draft.name || "").trim();
-      if (!rec.name) {
-        rec.name = (draft.colorName || "Kıyafet") + " " + CATS[draft.category].n.toLowerCase();
-      }
-      rec.colorInfo = draft.colorInfo || C.classify(draft.color);
-      rec.colorName = rec.colorInfo.name;
-      rec.createdAt = existing ? existing.createdAt : Date.now();
-      delete rec._url; delete rec._renamed;
-      DB.ITEMS.put(rec).then(() => refresh()).then(() => { closeModal(); render(); toast(existing ? "Güncellendi" : "Dolaba eklendi"); });
-    };
+    drawStep();
   }
 
   function comboMiniVisual(comboIds) {
@@ -541,7 +641,7 @@
         row.append(info);
         const btns = el("div", "btn-sm");
         const open = el("button", "icon-btn", "▶️");
-        open.onclick = () => { state.pano.items = JSON.parse(JSON.stringify(o.layout || [])); state.pano.sel = null; navigate("pano"); toast("Panoda açıldı"); };
+        open.onclick = () => ensurePanoClear(() => { state.pano.items = JSON.parse(JSON.stringify(o.layout || [])); state.pano.sel = null; navigate("pano"); toast("Panoda açıldı"); });
         const del = el("button", "icon-btn", "🗑️");
         del.onclick = () => confirmDlg("Sil?", "Kayıtlı kombin silinsin mi?").then((ok2) => { if (ok2) DB.OUTFITS.del(o.id).then(refresh).then(render); });
         btns.append(open, del);
@@ -554,16 +654,18 @@
   }
 
   function loadComboToPano(combo) {
-    state.pano.items = [];
-    state.pano.sel = null;
-    Object.keys(combo.ids).forEach((slot) => {
-      const id = combo.ids[slot];
-      if (!id) return;
-      const pos = SLOT_POS[slot] || SLOT_POS.aksesuar;
-      state.pano.items.push({ itemId: id, cat: slot, x: pos.x, y: pos.y, w: pos.w, rot: 0, z: state.pano.items.length });
+    ensurePanoClear(() => {
+      state.pano.items = [];
+      state.pano.sel = null;
+      Object.keys(combo.ids).forEach((slot) => {
+        const id = combo.ids[slot];
+        if (!id) return;
+        const pos = SLOT_POS[slot] || SLOT_POS.aksesuar;
+        state.pano.items.push({ itemId: id, cat: slot, x: pos.x, y: pos.y, w: pos.w, rot: 0, z: state.pano.items.length });
+      });
+      navigate("pano");
+      toast("Panoda yerleşti — istersen elle oynat");
     });
-    navigate("pano");
-    toast("Panoda yerleşti — istersen elle oynat");
   }
 
   function saveOutfitFromIds(ids, layout) {
@@ -617,7 +719,7 @@
     const wrap = el("div", "pano-wrap");
     const board = el("div", "board");
     const mannequin = el("div", "mannequin");
-    mannequin.innerHTML = '<svg viewBox="0 0 300 430" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g fill="currentColor"><circle cx="150" cy="38" r="26"/><rect x="140" y="58" width="20" height="18" rx="7"/><rect x="83" y="92" width="22" height="118" rx="11"/><rect x="195" y="92" width="22" height="118" rx="11"/><path d="M118 76 L182 76 C194 76 199 88 197 102 L191 226 C189 242 182 248 170 248 L130 248 C118 248 111 242 109 226 L103 102 C101 88 106 76 118 76 Z"/><rect x="116" y="248" width="30" height="142" rx="14"/><rect x="154" y="248" width="30" height="142" rx="14"/></g></svg>';
+    mannequin.innerHTML = '<svg viewBox="0 0 300 430" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g fill="currentColor">' + MANNEQUIN_SHAPES + "</g></svg>";
     board.append(mannequin);
     const ghostWrap = el("div", "ghosts");
     board.append(ghostWrap);
@@ -808,7 +910,7 @@
       if (!state.pano.items.length) { toast("Panoya önce parça ekle"); return; }
       savePanoDialog();
     };
-    bPng.onclick = () => exportPng();
+    bPng.onclick = () => exportPngDialog();
     bClear.onclick = () => confirmDlg("Temizle?", "Panodaki parçalar kalkacak (kayıtlıların silinmez).").then((ok) => { if (ok) { state.pano.items = []; state.pano.sel = null; paint(); toolSync(); } });
     actions.append(bSave, bPng, bClear);
     wrap.append(actions);
@@ -892,42 +994,87 @@
     toolSync();
     v.append(wrap);
   }
+  const MANNEQUIN_SHAPES = '<circle cx="150" cy="38" r="26"/><rect x="140" y="58" width="20" height="18" rx="7"/><rect x="83" y="92" width="22" height="118" rx="11"/><rect x="195" y="92" width="22" height="118" rx="11"/><path d="M118 76 L182 76 C194 76 199 88 197 102 L191 226 C189 242 182 248 170 248 L130 248 C118 248 111 242 109 226 L103 102 C101 88 106 76 118 76 Z"/><rect x="116" y="248" width="30" height="142" rx="14"/><rect x="154" y="248" width="30" height="142" rx="14"/>';
 
-  function exportPng() {
+  function mannequinSvg(fill) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 430"><g fill="' + fill + '">' + MANNEQUIN_SHAPES + "</g></svg>";
+  }
+
+  function exportPngDialog() {
     if (!state.pano.items.length) { toast("Panoya önce parça ekle"); return; }
+    const m = el("div", "modal mini");
+    m.append(el("h3", "", "PNG olarak indir"));
+    let withMan = false, dark = false;
+    const optMan = el("label", "fav-row");
+    const manChk = el("input");
+    manChk.type = "checkbox";
+    manChk.onchange = () => { withMan = manChk.checked; };
+    optMan.append(manChk, el("span", "", "📐 Manken silüeti dahil"));
+    m.append(optMan);
+    const bgLbl = el("div", "f-lbl", "Arka plan");
+    m.append(bgLbl);
+    const bgRow = el("div", "chips");
+    const mkBg = (lbl, val) => {
+      const b = el("button", "chip" + (val === dark ? " active" : ""), lbl);
+      b.onclick = () => { dark = val; $$("button", bgRow).forEach((x) => x.classList.remove("active")); b.classList.add("active"); };
+      return b;
+    };
+    bgRow.append(mkBg("Açık", false), mkBg("Koyu", true));
+    m.append(bgRow);
+    const row = el("div", "btn-row");
+    const no = el("button", "btn ghost", "Vazgeç");
+    no.onclick = closeModal;
+    const go = el("button", "btn primary", "⬇️ İndir");
+    go.onclick = () => { closeModal(); exportPng(withMan, dark); };
+    row.append(no, go);
+    m.append(row);
+    openModal(m);
+  }
+
+  function exportPng(withMan, dark) {
     const cv = document.createElement("canvas");
     cv.width = 900;
     cv.height = 1200;
     const ctx = cv.getContext("2d");
-    ctx.fillStyle = "#f5f2ea";
+    ctx.fillStyle = dark ? "#171a21" : "#f5f2ea";
     ctx.fillRect(0, 0, cv.width, cv.height);
-    ctx.font = "28px system-ui";
-    ctx.fillStyle = "#b7b2a6";
+    ctx.font = "600 30px system-ui, sans-serif";
+    ctx.fillStyle = dark ? "#8b8ea0" : "#b7b2a6";
     ctx.textAlign = "center";
-    ctx.fillText("🧥 Kombin", cv.width / 2, 54);
-    const entries = state.pano.items.slice().sort((a, b) => (a.z || 0) - (b.z || 0));
-    Promise.all(entries.map((p) => {
-      const it = state.items.find((i) => i.id === p.itemId);
-      if (!it || !it.img) return null;
-      return CAM.loadImage(it.img).then((img) => ({ img: img, p: p }));
-    })).then((vals) => {
-      vals.filter(Boolean).forEach(({ img, p }) => {
-        const wpx = (p.w / 100) * cv.width;
-        const hpx = wpx * img.naturalHeight / img.naturalWidth;
-        ctx.save();
-        ctx.translate((p.x / 100) * cv.width, (p.y / 100) * cv.height);
-        ctx.rotate((p.rot || 0) * Math.PI / 180);
-        ctx.drawImage(img, -wpx / 2, -hpx / 2, wpx, hpx);
-        ctx.restore();
+    ctx.fillText("🧥 Kombin", cv.width / 2, 58);
+    const drawItems = () => {
+      const entries = state.pano.items.slice().sort((a, b) => (a.z || 0) - (b.z || 0));
+      return Promise.all(entries.map((p) => {
+        const it = state.items.find((i) => i.id === p.itemId);
+        if (!it || !it.img) return null;
+        return CAM.loadImage(it.img).then((img) => ({ img: img, p: p }));
+      })).then((vals) => {
+        vals.filter(Boolean).forEach(({ img, p }) => {
+          const wpx = (p.w / 100) * cv.width;
+          const hpx = wpx * img.naturalHeight / img.naturalWidth;
+          ctx.save();
+          ctx.translate((p.x / 100) * cv.width, (p.y / 100) * cv.height);
+          ctx.rotate((p.rot || 0) * Math.PI / 180);
+          ctx.drawImage(img, -wpx / 2, -hpx / 2, wpx, hpx);
+          ctx.restore();
+        });
+        cv.toBlob((b) => {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(b);
+          a.download = "kombin-" + Date.now() + ".png";
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+          toast("PNG indirildi");
+        }, "image/png");
       });
-      cv.toBlob((b) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(b);
-        a.download = (state.pano.items.length ? "kombin-" : "kombin-") + Date.now() + ".png";
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-        toast("PNG indirildi");
-      }, "image/png");
+    };
+    if (!withMan) { drawItems(); return; }
+    const svgBlob = new Blob([mannequinSvg(dark ? "#2b303a" : "#dbd8cd")], { type: "image/svg+xml" });
+    CAM.loadImage(svgBlob).then((mimg) => {
+      const w = cv.width * 0.66;
+      const h = w * 430 / 300;
+      ctx.drawImage(mimg, (cv.width - w) / 2, cv.height * 0.03, w, cv.height * 0.95);
+      return drawItems();
     });
   }
 

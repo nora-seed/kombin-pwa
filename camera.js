@@ -463,6 +463,34 @@
       };
 
       window.addEventListener("resize", drawOverlay);
+
+      const autoStep = () => {
+        const early = base.getContext("2d").getImageData(0, 0, base.width, base.height).data;
+        const w = base.width, h = base.height;
+        const probe = [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]].every(([x, y]) => early[(y * w + x) * 4 + 3] < 50);
+        if (probe) return { flood: false, trimmed: false, skip: true };
+        history.push(pushHistory(base));
+        const flood = floodClear(base);
+        let trimmed = false;
+        if (flood) {
+          const t = trimTransparent(base);
+          if (t.width !== base.width || t.height !== base.height) {
+            base.width = t.width; base.height = t.height;
+            ctx.drawImage(t, 0, 0);
+            trimmed = true;
+          }
+        }
+        return { flood: flood, trimmed: trimmed };
+      };
+
+      setTimeout(() => {
+        const r = autoStep();
+        if (r.flood && r.trimmed) toastBase("Zemin otomatik temizlendi ve kenarları kesildi ✔ (Geri ile iptal)");
+        else if (r.flood) toastBase("Düz zemin otomatik temizlendi ✔ (Geri ile iptal)");
+        else if (r.skip) toastBase("Bu görsel zaten temiz görünüyor — düzenlemeye devam edebilirsin");
+        else toastBase("Arka plan düzgün değil — Silgi ya da ✂️ ile ince ayar yap");
+      }, 250);
+
       setMode("none");
     }));
   }
